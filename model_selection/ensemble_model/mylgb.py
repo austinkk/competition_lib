@@ -4,11 +4,13 @@
 import pandas as pd
 import lightgbm as lgb
 import gc
+from sklearn.metrics import f1_score
+from sklearn.externals import joblib
 
 class Mylgb(object):
     """mylgb is best tool for data mining"""
     def __init__(self, config):
-        if  "params" in config:
+        if "params" in config:
             self.params = config["params"]
         else:
             self.set_default_params()
@@ -16,6 +18,10 @@ class Mylgb(object):
             self.tr_data = config["lgb_data"]
         else:
             self.tr_data = None
+        if "lgb_label" in config:
+            self.tr_label = config["lgb_label"]
+        else:
+            self.tr_label = None
         if "nfold" in config:
             self.nfold = config["nfold"]
         else:
@@ -45,6 +51,18 @@ class Mylgb(object):
             self.min_merror = float('Inf')
         self.model = None
         self.score = 0.0
+        self.thres = 0.5 #for binary classification
+    
+    def get_best_thres(self):
+        tmp_pred = self.model.predict(self.tr_data)
+        tmp = 0
+        for t in range(0,100):
+            tmp_thres = t / 100.0
+            pred = [int(i > tmp_thres) for i in tmp_pred]
+            fs = f1_score(self.tr_label, pred)
+            if tmp < fs:
+                tmp = fs
+                self.thres = tmp_thres
     
     def set_tr_data(self, data):
         self.tr_data = data
@@ -53,9 +71,10 @@ class Mylgb(object):
         if self.tr_data == None:
             print ("lack of train data")
             return False
+        lgb_train = lgb.Dataset(self.tr_data, self.tr_label)
         cv_results = lgb.cv(
                             params = self.params,
-                            train_set = self.tr_data,
+                            train_set = lgb_train,
                             seed = self.seed,
                             nfold = self.nfold,
                             num_boost_round = self.num_boost_round,
@@ -68,7 +87,7 @@ class Mylgb(object):
         else:
             boost_rounds = pd.Series(cv_results[self.params['metric'] + '-mean']).idxmin()
             self.score = pd.Series(cv_results[self.params['metric'] + '-mean']).min()
-        self.model = lgb.train(self.params, self.tr_data, num_boost_round = boost_rounds)
+        self.model = lgb.train(self.params, lgb_train, num_boost_round = boost_rounds)
         return True
         
     def set_default_params(self):
@@ -205,6 +224,12 @@ class Mylgb(object):
     # TODO: LGB粒子群调参法
     def pso_find_best_params(self):
         pass
+        
+    def save_model(self, model_path):
+        joblib.dump(self.model,model_path)
+    
+    def load_model(self, model_path):
+        self.model = joblib.load(model_path) 
 
 """ 多分类参数 (lgb 在很多类别的时候，分类效果不好)
 params = {
