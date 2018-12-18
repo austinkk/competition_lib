@@ -6,6 +6,7 @@ import numpy as np
 import collections
 
 from sklearn.externals import joblib
+from sklearn.model_selection import train_test_split
 
 def is_float(x):
     try:
@@ -65,3 +66,7 @@ def save_model(model, model_path):
     
 def load_model(model_path):
     return joblib.load(model_path)
+
+def get_split_data(tr_feature, tr_label, scale = 0.2, random_state = 42):
+    X_train,  X_val, y_train, y_val = train_test_split(tr_feature, tr_label, test_size = scale, random_state = random_state)
+    return X_train, X_val, y_train, y_val
