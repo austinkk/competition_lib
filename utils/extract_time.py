@@ -120,3 +120,6 @@ def time_extract(text):
     result = list(filter(lambda x: x is not None, [check_time_valid(w) for w in time_res]))
     final_res = [parse_datetime(w) for w in result]
     return [x for x in final_res if x is not None]
+
+if __name__ == '__main__':
+    print (time_extract('ÎҪסµ½ÃÌÏÎ3µ'))
