@@ -12,16 +12,17 @@ from sklearn.manifold import TSNE
 import pickle
 import gc
 
-class CBOWConfig(object):
-    """CBOW params"""
+class SKIPGRAMConfig(object):
+    """Skipgram params"""
     filename = './data/en_corpus'
     vocabulary_size = 50000
     batch_size = 128
     embedding_size = 128 # Dimension of the embedding vector.
-    half_window_size = 1 # How many words to consider left and right.
+    skip_window = 1 # How many words to consider left and right.
+    num_skips = 2 # How many times to reuse an input to generate a label.
     # We pick a random validation set to sample nearest neighbors. here we limit the
     # validation samples to the words that have a low numeric ID, which by
-    # construction are also the most frequent. 
+    # construction are also the most frequent.    
     valid_size = 16 # Random set of words to evaluate similarity on.
     valid_window = 100 # Only pick dev samples in the head of the distribution.
     valid_examples = np.array(random.sample(range(valid_window), valid_size))
@@ -29,10 +30,10 @@ class CBOWConfig(object):
     num_sampled = 64 # Number of negative examples to sample.
     num_steps = 100001
 
-    w2v_filename = './tf_%s_size-%s_windows-%s_vocabulary-%s.w2v' % ('CBOW', embedding_size, half_window_size * 2 + 1, vocabulary_size)
+    w2v_filename = './tf_%s_num_skip-%s_windows-%s_vocabulary-%s.w2v' % ('SKIPGRAM', num_skips, skip_window * 2 + 1, vocabulary_size)
 
-class CBOW(object):
-    """CBOW"""
+class SKIPGRAM(object):
+    """SKIPGRAM"""
     def __init__(self, config):
         self.data_index = 0
         self.config = config
@@ -69,50 +70,68 @@ class CBOW(object):
         reverse_dictionary = dict(zip(dictionary.values(), dictionary.keys())) 
         return data, count, dictionary, reverse_dictionary
 
-
-    def generate_batch(self, data, batch_size, half_window_size):
-        batch = np.ndarray(shape=(batch_size, 2*half_window_size), dtype=np.int32)
+    def generate_batch(self, data, batch_size, num_skips, skip_window):
+        assert batch_size % num_skips == 0  # each word pair is a batch, so a training data [context target context] would increase batch number of 2.
+        assert num_skips <= 2 * skip_window
+        batch = np.ndarray(shape=(batch_size), dtype=np.int32)
         labels = np.ndarray(shape=(batch_size, 1), dtype=np.int32)
-        len_data = len(data)
-        for i in range(batch_size):
-            index = self.data_index
-            labels[i] = data[(index+half_window_size)%len_data]
-            for k in range(2*half_window_size+1):
-                if k != half_window_size:
-                    t = (k if k < half_window_size else k-1)
-                    batch[i, t] = data[(index+k)%len_data]
-            self.data_index = (self.data_index + 1) % len_data
+        span = 2 * skip_window + 1 # [ skip_window target skip_window ]
+        buffer = collections.deque(maxlen=span)
+        for _ in range(span):
+            buffer.append(data[self.config.data_index])
+            self.config.data_index = (self.config.data_index + 1) % len(data)
+        for i in range(batch_size // num_skips):
+            target = skip_window  # target label at the center of the buffer
+            targets_to_avoid = [ skip_window ]
+            for j in range(num_skips):
+                while target in targets_to_avoid:
+                    target = random.randint(0, span - 1)
+                targets_to_avoid.append(target)
+                batch[i * num_skips + j] = buffer[skip_window]
+                labels[i * num_skips + j, 0] = buffer[target]
+            buffer.append(data[self.config.data_index])
+            self.config.data_index = (self.config.data_index + 1) % len(data)
         return batch, labels
 
-    def cbow(self):
+    def skipgram(self):
         self.graph = tf.Graph()
         with self.graph.as_default():
-            self.tf_train_dataset = tf.placeholder(tf.int32, shape=(self.config.batch_size, 2*self.config.half_window_size))
-            self.tf_train_labels = tf.placeholder(tf.int32, shape=(self.config.batch_size, 1))
-            tf_valid_dataset = tf.constant(self.config.valid_examples, dtype=tf.int32)
+            # Input data.
+            self.train_dataset = tf.placeholder(tf.int32, shape=[self.config.batch_size])
+            self.train_labels = tf.placeholder(tf.int32, shape=[self.config.batch_size, 1])
+            valid_dataset = tf.constant(self.config.valid_examples, dtype=tf.int32)
 
-            embeddings = tf.Variable(tf.random_uniform(shape=(self.config.vocabulary_size, self.config.embedding_size), minval=-1.0, maxval=1.0))
-            softmax_weights = tf.Variable(tf.truncated_normal(shape=(self.config.vocabulary_size, self.config.embedding_size), stddev=1.0 / math.sqrt(self.config.embedding_size)))
-            softmax_biases = tf.constant(np.zeros(shape=(self.config.vocabulary_size), dtype=np.float32))
+            # Variables.
+            embeddings = tf.Variable(
+                                     tf.random_uniform([self.config.vocabulary_size, self.config.embedding_size], -1.0, 1.0))
+            softmax_weights = tf.Variable(
+                                     tf.truncated_normal([self.config.vocabulary_size, self.config.embedding_size], stddev=1.0 / math.sqrt(self.config.embedding_size)))
+            softmax_biases = tf.Variable(tf.zeros([self.config.vocabulary_size]))
 
-            embed = tf.nn.embedding_lookup(embeddings, self.tf_train_dataset)
-            inputs = tf.reduce_sum(embed, 1)
-            self.loss = tf.reduce_mean(
-                                       tf.nn.sampled_softmax_loss(
-                                                                  softmax_weights, softmax_biases, self.tf_train_labels, inputs,self.config.num_sampled, self.config.vocabulary_size
-                                                                 )
-                                      )
+            # Model.
+            # Look up embeddings for inputs.
+            embed = tf.nn.embedding_lookup(embeddings, self.train_dataset)
+            # Compute the softmax loss, using a sample of the negative labels each time.
+            self.loss = tf.reduce_mean(tf.nn.sampled_softmax_loss(softmax_weights, softmax_biases, self.train_labels, embed, self.config.num_sampled, self.config.vocabulary_size))
+
+            # Optimizer.
+            # Note: The optimizer will optimize the softmax_weights AND the embeddings.
+            # This is because the embeddings are defined as a variable quantity and the
+            # optimizer's `minimize` method will by default modify all variable quantities 
+            # that contribute to the tensor it is passed.
+            # See docs on `tf.train.Optimizer.minimize()` for more details.
             self.optimizer = tf.train.AdagradOptimizer(1.0).minimize(self.loss)
 
-            valid_embed = tf.nn.embedding_lookup(embeddings, tf_valid_dataset)
-            self.similarity = tf.matmul(valid_embed, tf.transpose(softmax_weights)) + softmax_biases
-    
+            # Compute the similarity between minibatch examples and all embeddings.
+            # We use the cosine distance:
             norm = tf.sqrt(tf.reduce_sum(tf.square(embeddings), 1, keep_dims=True))
             self.normalized_embeddings = embeddings / norm
-            norm_ = tf.sqrt(tf.reduce_sum(tf.square(softmax_weights), 1, keep_dims=True))
-            normalized_softmax_weights = softmax_weights / norm_
-            norm_ = tf.sqrt(tf.reduce_sum(tf.square(normalized_softmax_weights+self.normalized_embeddings), 1, keep_dims=True))
-            self.normalized_embeddings_2 = (normalized_softmax_weights+self.normalized_embeddings) / 2.0 / norm_
+            valid_embeddings = tf.nn.embedding_lookup(
+                                            self.normalized_embeddings, valid_dataset)
+            self.similarity = tf.matmul(valid_embeddings, tf.transpose(self.normalized_embeddings))
+            embeddings_2 = (self.normalized_embeddings + softmax_weights)/2.0
+            norm_ = tf.sqrt(tf.reduce_sum(tf.square(embeddings_2), 1, keep_dims=True))
+            self.normalized_embeddings_2 = embeddings_2 / norm_
 
     def train(self):
         words = self.read_data(self.config.filename)
@@ -123,14 +142,14 @@ class CBOW(object):
         del words  # Hint to reduce memory.
         gc.collect()
 
-        for half_window_size in [1, 2]:
-            data_index = 0
-            batch, labels = self.generate_batch(data, 8, half_window_size)
-            print ('\nwith half_window_size = %d:' % (half_window_size))
-            print ('    batch:', [[reverse_dictionary[b] for b in bi] for bi in batch])
-            print ('    labels:', [reverse_dictionary[li] for li in labels.reshape(8)])
+        for num_skips, skip_window in [(2, 1), (4, 2)]:
+            self.config.data_index = 0
+            batch, labels = self.generate_batch(data, batch_size=8, num_skips=num_skips, skip_window=skip_window)
+            print('\nwith num_skips = %d and skip_window = %d:' % (num_skips, skip_window))
+            print('    batch:', [reverse_dictionary[bi] for bi in batch])
+            print('    labels:', [reverse_dictionary[li] for li in labels.reshape(8)])
 
-        self.cbow()
+        self.skipgram()
         with tf.Session(graph=self.graph) as session:
             if int(tf.VERSION.split('.')[1]) > 11:
                 tf.global_variables_initializer().run()
@@ -140,8 +159,8 @@ class CBOW(object):
 
             average_loss = 0.0
             for step in range(self.config.num_steps):
-                train_batch, train_labels = self.generate_batch(data, self.config.batch_size, self.config.half_window_size)
-                feed_dict = {self.tf_train_dataset: train_batch, self.tf_train_labels: train_labels}
+                train_batch, train_labels = self.generate_batch(data, self.config.batch_size, self.config.num_skips, self.config.skip_window)
+                feed_dict = {self.train_dataset: train_batch, self.train_labels: train_labels}
                 l, _ = session.run([self.loss, self.optimizer], feed_dict=feed_dict)
                 average_loss += l
 
@@ -184,7 +203,7 @@ class CBOW(object):
         """
 
 if __name__ == '__main__':
-    config = CBOWConfig()
-    cbow_model = CBOW(config)
-    cbow_model.train()
+    config = SKIPGRAMConfig()
+    skipgram_model = SKIPGRAM(config)
+    skipgram_model.train()
 
