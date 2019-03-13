@@ -4,6 +4,8 @@
 import math
 import numpy as np
 import collections
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler, MaxAbsScaler, StandardScaler
 
 from sklearn.externals import joblib
 from sklearn.model_selection import train_test_split
@@ -70,3 +72,25 @@ def load_model(model_path):
 def get_split_data(tr_feature, tr_label, scale = 0.2, random_state = 42):
     X_train,  X_val, y_train, y_val = train_test_split(tr_feature, tr_label, test_size = scale, random_state = random_state)
     return X_train, X_val, y_train, y_val
+
+# 标准化/归一化
+#归一化算法是通过特征的最大最小值将特征缩放到[0,1]区间范围内，而多于许多机器学习算法，标准化也许会更好，
+#标准化是通过特征的平均值和标准差将特征缩放成一个标准的正态分布，均值为0，方差为1。
+def get_normalization_maxmin(series):
+    minMax = MinMaxScaler()
+    x_std = minMax.fit_transform(series)
+    return x_std
+
+def get_normalization_maxabs(series):
+    maxAbs = MaxAbsScaler()
+    x_std = maxAbs.fit_transform(series)
+    return x_std
+
+def get_standardization(series):
+    ss = StandardScaler()
+    x_std = ss.fit_transform(series)
+    return x_std
+
+#y = atan(x) * 2 / π
+def get_atan_2pi(df, f_name):
+    df[f_name] = df[f_name].apply(lambda x: math.atan(x) * 2 / math.pi)
