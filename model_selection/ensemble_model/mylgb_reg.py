@@ -5,6 +5,9 @@ import pandas as pd
 import lightgbm as lgb
 import gc
 from sklearn.externals import joblib
+import time
+import itertools
+import numpy as np
 
 class Mylgb_regression(object):
     """mylgb is best tool for data mining"""
@@ -13,14 +16,28 @@ class Mylgb_regression(object):
             self.params = config["params"]
         else:
             self.set_default_params()
-        if "lgb_data" in config:
-            self.tr_data = config["lgb_data"]
+
+        if "df_train" in config:
+            self.df_train = config["df_train"]
         else:
-            self.tr_data = None
-        if "lgb_label" in config:
-            self.tr_label = config["lgb_label"]
+            self.df_train = None
+        if "df_test" in config:
+            self.df_test = config["df_test"]
         else:
-            self.tr_label = None
+            self.df_test = None
+
+        self.id_name = config["id_name"]
+        self.label_name = config["label_name"]
+        if "base_feature" in config:
+            self.base_feature = config["base_feature"]
+        else:
+            self.base_feature = [col_name for col_name in self.df_train.columns if col_name not in [self.id_name, self.label_name]]
+
+        if "best_feature" in config:
+            self.best_feature = config["best_feature"]
+        else:
+            self.best_feature = [col_name for col_name in self.base_feature]
+
         if "nfold" in config:
             self.nfold = config["nfold"]
         else:
@@ -47,11 +64,59 @@ class Mylgb_regression(object):
     def get_best_thres(self):
         pass
 
-    def set_tr_data(self, data):
-        self.tr_data = data
+    def find_best_feature_forward(self):
+        base_best_score = self.get_score(self.base_feature)
+        while (True):
+            is_found = False
+            tmp_best_feature = [col_name for col_name in self.base_feature]
+            for tmp_feature in itertools.combinations(self.base_feature, len(self.base_feature) - 1):
+                tmp_score = self.get_score(list(tmp_feature))
+                if tmp_score <= base_best_score:
+                    is_found = True
+                    tmp_best_feature = [col_name for col_name in list(tmp_feature)]
+                    base_best_score = tmp_score
+            if is_found:
+                self.base_feature = tmp_best_feature
+            else:
+                break
+        self.best_feature = [col_name for col_name in self.base_feature]
 
-    def train(self):
-        lgb_train = lgb.Dataset(self.tr_data, self.tr_label)
+    def find_best_feature_backward(self, new_feature_name_list):
+        base_best_score = self.get_score(self.base_feature)
+        nf_l = new_feature_name_list
+        while (True):
+            is_found = False
+            add_feature = None
+            for tmp_feature in nf_l:
+                tmp_score = self.get_score(self.base_feature + [tmp_feature])
+                if tmp_score <= base_best_score:
+                    is_found = True
+                    add_feature = tmp_feature
+                    base_best_score = tmp_score
+            if is_found:
+                self.base_feature.append(add_feature)
+                nf_l.remove(add_feature)
+            else:
+                break
+        self.best_feature = [col_name for col_name in self.base_feature]
+
+    def get_score(self, fn):
+        lgb_train = lgb.Dataset(self.df_train[fn].values, self.df_train[self.label_name].values)
+        cv_results = lgb.cv(
+                            params = self.params,
+                            train_set = lgb_train,
+                            seed = self.seed,
+                            nfold = self.nfold,
+                            num_boost_round = self.num_boost_round,
+                            early_stopping_rounds = self.early_stopping_rounds,
+                            verbose_eval = 0
+                           )
+        boost_rounds = pd.Series(cv_results['l1-mean']).idxmin()
+        score = pd.Series(cv_results['l1-mean']).min()
+        return score
+
+    def train(self, make_submit = False, filepath = None):
+        lgb_train = lgb.Dataset(self.df_train[self.best_feature].values, self.df_train[self.label_name].values)
         cv_results = lgb.cv(
                             params = self.params,
                             train_set = lgb_train,
@@ -62,9 +127,23 @@ class Mylgb_regression(object):
                             verbose_eval = self.verbose_eval
                            )
         boost_rounds = pd.Series(cv_results['l1-mean']).idxmin()
-        self.score = pd.Series(cv_results['l1-mean']).min()
+        score = pd.Series(cv_results['l1-mean']).min()
         self.model = lgb.train(self.params, lgb_train, num_boost_round = boost_rounds)
-        return True
+        if make_submit:
+            self.make_submit(filepath)
+        return score
+
+    def make_submit(self, filepath):
+        test_y = self.model.predict(self.df_test[self.best_feature].values)
+        test_y = np.array(test_y, dtype = int)
+        df_submit = pd.DataFrame()
+        df_submit['id'] = self.df_test[self.id_name].values
+        df_submit['score'] = test_y
+        if filepath == None:
+            tmp = './submit/submit_%s.csv' % int(time.time())
+            df_submit.to_csv(tmp, index = None)
+        else:
+            df_submit.to_csv(filepath, index = None)
 
     def set_default_params(self):
         self.params = {
@@ -120,7 +199,7 @@ class Mylgb_regression(object):
 
     def adj_depth(self, seed = 66, nfold = 5, early_stopping_rounds = 100):
         best_params = {}
-        lgb_train = lgb.Dataset(self.tr_data, self.tr_label)
+        lgb_train = lgb.Dataset(self.df_train[self.best_feature].values, self.df_train[self.label_name].values)
         for max_depth in [3,5,7,9,12,15,17,25]:
             self.params['max_depth'] = max_depth
             cv_results = lgb.cv(
@@ -141,7 +220,7 @@ class Mylgb_regression(object):
 
     def adj_min_child_weight(self, seed = 66, nfold = 5, early_stopping_rounds = 100):
         best_params = {}
-        lgb_train = lgb.Dataset(self.tr_data, self.tr_label)
+        lgb_train = lgb.Dataset(self.df_train[self.best_feature].values, self.df_train[self.label_name].values)
         for min_child_weight in [1, 3, 5, 7]:
             self.params['min_child_weight'] = min_child_weight
             cv_results = lgb.cv(
@@ -162,7 +241,7 @@ class Mylgb_regression(object):
 
     def adj_bin_leafdata(self, seed = 66, nfold = 5, early_stopping_rounds = 100):
         best_params = {}
-        lgb_train = lgb.Dataset(self.tr_data, self.tr_label)
+        lgb_train = lgb.Dataset(self.df_train[self.best_feature].values, self.df_train[self.label_name].values)
         for max_bin in range(100,255,10):
             for min_data_in_leaf in range(10,200,10):
                 self.params['max_bin'] = max_bin
@@ -186,7 +265,7 @@ class Mylgb_regression(object):
 
     def adj_fraction(self, seed = 66, nfold = 5, early_stopping_rounds = 100):
         best_params = {}
-        lgb_train = lgb.Dataset(self.tr_data, self.tr_label)
+        lgb_train = lgb.Dataset(self.df_train[self.best_feature].values, self.df_train[self.label_name].values)
         for feature_fraction in [0.6,0.7,0.8,0.9, 1]:
             for bagging_fraction in [0.6, 0.7, 0.8, 0.9, 1]:
                 self.params['feature_fraction'] = feature_fraction
@@ -210,7 +289,7 @@ class Mylgb_regression(object):
 
     def adj_lambda(self, seed = 66, nfold = 5, early_stopping_rounds = 100):
         best_params = {}
-        lgb_train = lgb.Dataset(self.tr_data, self.tr_label)
+        lgb_train = lgb.Dataset(self.df_train[self.best_feature].values, self.df_train[self.label_name].values)
         for lambda_l1 in [0.0, 0.1, 0.5, 1.0]:
             for lambda_l2 in [0.0, 0.01, 0.1, 1.0]:
                 for min_split_gain in [0.0,1.0]:
