@@ -1,9 +1,6 @@
 
 # coding: utf-8
 
-# In[1]:
-
-
 import pandas as pd
 import numpy as np
 import math
@@ -13,9 +10,6 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 
 
 # # 数值特征
-
-# In[12]:
-
 
 # 分箱
 def fixed_box(x, box_bound):
@@ -49,8 +43,6 @@ def quantile_box(x, q_num):
     return pd.qcut(x, q_num, labels=False)
 
 
-# In[28]:
-
 
 # 对数变换　（指数变换的特例）
 def log_trans(x, base):
@@ -67,7 +59,6 @@ def box_cox(x, lambda_ = 0, auto = True):
     return result
 
 
-# In[51]:
 
 
 # 特征缩放，归一化
@@ -88,27 +79,13 @@ def l2(x):
     return preproc.normalize(df[['tmp']], axis = 0).reshape(-1)
 
 
-# # 文本特征
-
-# In[ ]:
-
-
+# 文本特征
 # n元词袋
-
-
-# In[ ]:
-
-
 class BagOfNGram(object):
-    def __init__(self, texts, stopwordpath = "", is_english = True):
-        with open(stopwordpath, 'rb') as fp:
-            stopword = fp.read().decode('utf-8')  # 提用词提取
-        #将停用词表转换为list
-        stpwrdlst = stopword.splitlines()
-        if is_english:
-            self.cv = CountVectorizer(stop_words = stpwrdlst)
-        else:
-            self.cv = CountVectorizer(stop_words = 'english')
+    def __init__(self, texts, config, stopwordpath = ""):
+       if len(stopwordpath) > 0:
+            config['stop_words'] = _read_stop_word(stopwordpath)
+        self.cv = CountVectorizer(**config)
         self.cv.fit(texts)
 
     #　列表形式呈现文章生成的词典
@@ -123,17 +100,107 @@ class BagOfNGram(object):
     def get_sparse_matrix(self, texts):
         return self.cv.transform(texts).toarray()
     
-    def get_default_config():
-        config = {
-            analyzer = 'word', # 'char', 'char_wb', callable
-            preprocessor = None, # callable
-            tokenizer = None, # callable
-            ngram_range  = (1,3),
-            stop_words = 'english',
-            lowercase = True,
-            #token_pattern = '' #过滤规则，正则表达式，需要设置analyzer == 'word'
-            max_df = 1.0 # df是document frequency，当df＞[0.0, 1.0]某个值，就过滤掉．也可以是int，表示词出现的次数
-            min_df = 0.0 # 类似max_df
-            max_features = None # 默认为None，可设为int，
-        }
+    def get_default_config(is_eng = True):
+        if is_eng:
+            config = {
+                'analyzer' : 'word', # 'char', 'char_wb', callable
+                'preprocessor' : None, # callable
+                'tokenizer' : None, # callable
+                'ngram_range' : (1,3),
+                'stop_words' : 'english',
+                'lowercase' : True,
+                'token_pattern' : '(?u)\\b\\w+\\b', #过滤规则，正则表达式，需要设置analyzer == 'word'
+                'max_df' : 1.0, # df是document frequency，当df＞[0.0, 1.0]某个值，就过滤掉．也可以是int，表示词出现的次数
+                'min_df' : 0.0, # 类似max_df
+                'max_features' : None, # 默认为None，可设为int，按frequency降序排序，取前max_features个作为关键词表
+                'vocabulary' : None # 指定关键词集
+            }
+        else:
+            config = {
+                'analyzer' : 'word', # 'char', 'char_wb', callable
+                'preprocessor' : None, # callable
+                'tokenizer' : None, # callable
+                'ngram_range' : (1,3),
+                'stop_words' : None,
+                'lowercase' : True,
+                'token_pattern' : '(?u)\\b\\w+\\b', #过滤规则，正则表达式，需要设置analyzer == 'word'
+                'max_df' : 1.0, # df是document frequency，当df＞[0.0, 1.0]某个值，就过滤掉．也可以是int，表示词出现的次数
+                'min_df' : 0.0, # 类似max_df
+                'max_features' : None, # 默认为None，可设为int，按frequency降序排序，取前max_features个作为关键词表
+                'vocabulary' : None # 指定关键词集
+            }
+        return config
 
+    def _read_stop_word(path):
+        with open(stopwordpath, 'rb') as fp:
+            stopword = fp.read().decode('utf-8')  # 提用词提取
+        #将停用词表转换为list
+        return stopword.splitlines()
+
+# tf-idf 
+class TfIdf(object):
+    def __init__(self, texts, config, stopwordpath = ""):
+       if len(stopwordpath) > 0:
+            config['stop_words'] = _read_stop_word(stopwordpath)
+        self.cv = TfidfVectorizer(**config)
+        self.cv.fit(texts)
+
+    #　列表形式呈现文章生成的词典
+    def get_feature_names(self):
+        return self.cv.get_feature_names()
+
+    # 字典形式呈现，key：词，value:词频
+    def get_vocabulary(self):
+        return self.cv.vocabulary_
+
+    def get_idf(self):
+        return self.cv.idf_
+    
+    # 是将结果转化为稀疏矩阵矩阵的表示方式
+    def get_sparse_matrix(self, texts):
+        return self.cv.transform(texts).toarray()
+    
+    def get_default_config(is_eng = True):
+        if is_eng:
+            config = {
+                'analyzer' : 'word', # 'char', 'char_wb', callable
+                'preprocessor' : None, # callable
+                'tokenizer' : None, # callable
+                'ngram_range' : (1,3),
+                'stop_words' : 'english',
+                'lowercase' : True,
+                'token_pattern' : '(?u)\\b\\w+\\b', #过滤规则，正则表达式，需要设置analyzer == 'word'
+                'max_df' : 1.0, # df是document frequency，当df＞[0.0, 1.0]某个值，就过滤掉．也可以是int，表示词出现的次数
+                'min_df' : 1, # 类似max_df
+                'max_features' : None, # 默认为None，可设为int，按frequency降序排序，取前max_features个作为关键词表
+                'vocabulary' : None, # 指定关键词集
+                'norm' : 'l2', # 'l1', 'l2', None
+                'use_idf' : True,
+                'smooth_idf' : True,
+                'sublinear_tf' : False # replace tf with 1 + log(tf)
+            }
+        else:
+            config = {
+                'analyzer' : 'word', # 'char', 'char_wb', callable
+                'preprocessor' : None, # callable
+                'tokenizer' : None, # callable
+                'ngram_range' : (1,3),
+                'stop_words' : None,
+                'lowercase' : True,
+                'token_pattern' : '(?u)\\b\\w+\\b', #过滤规则，正则表达式，需要设置analyzer == 'word'
+                'max_df' : 1.0, # df是document frequency，当df＞[0.0, 1.0]某个值，就过滤掉．也可以是int，表示词出现的次数
+                'min_df' : 1, # 类似max_df
+                'max_features' : None, # 默认为None，可设为int，按frequency降序排序，取前max_features个作为关键词表
+                'vocabulary' : None, # 指定关键词集
+                'norm' : 'l2', # 'l1', 'l2', None
+                'use_idf' : True,
+                'smooth_idf' : True,
+                'sublinear_tf' : False # replace tf with 1 + log(tf)
+            }
+        return config
+
+    def _read_stop_word(path):
+        with open(stopwordpath, 'rb') as fp:
+            stopword = fp.read().decode('utf-8')  # 提用词提取
+        #将停用词表转换为list
+        return stopword.splitlines()
