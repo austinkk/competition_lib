@@ -13,6 +13,7 @@ import sklearn.preprocessing.OneHotEncoder
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.feature_extraction import FeatureHasher
+#from pyhanlp import * # pip install pyhanlp 在线演示 cmd 中输入:hanlp serve, http://localhost:8765
 
 # # 数值特征
 
@@ -162,7 +163,7 @@ class TfIdf(object):
     def get_sparse_matrix(self, texts):
         return self.cv.transform(texts).toarray()
     
-    def get_default_config(is_eng = True):
+    def get_default_config(self, is_eng = True):
         if is_eng:
             config = {
                 'analyzer' : 'word', # 'char', 'char_wb', callable
@@ -201,7 +202,7 @@ class TfIdf(object):
             }
         return config
 
-    def _read_stop_word(path):
+    def _read_stop_word(self, path):
         with open(stopwordpath, 'rb') as fp:
             stopword = fp.read().decode('utf-8')  # 提用词提取
         #将停用词表转换为list
@@ -211,40 +212,51 @@ class TfIdf(object):
 
 
 # 切词
+
+# hanlp tools
+# TODO
+class HanlpTools(object):
+    def __init__(self):
+        pass
+
+    def get_words_list(self, content):
+        return HanLP.segment(content)
+
+
 # jieba tools
 class JiebaTools(object):
     def __init__(self):
         pass
 
-    def get_words(s, cut_all = False, sep = ' '):
+    def get_words(self, s, cut_all = False, sep = ' '):
         # cut all为True为全模式，各种词都会匹配出来，不能解决歧义
         # cut all为False为精确模式，适合文本分析
         return sep.join(jieba.cut(s, cut_all = cut_all))
 
-    def get_words_search(s, sep = ' '):
+    def get_words_search(self, s, sep = ' '):
         # 搜索引擎模式
         return sep.join(jieba.cut_for_search(s))
 
-    def load_userdict(file_name):
+    def load_userdict(self, file_name):
         # 输入格式: 一行一个词，词语、词频(可省略)、词性(可省略)
         jieba.load_userdict(file_name)
 
     # 动态修改词典
-    def add_word(word, freq = None, tag = None):
+    def add_word(self, word, freq = None, tag = None):
         jieba.add_word(word, freq, tag)
 
-    def del_word(word):
+    def del_word(self, word):
         jieba.del_word(word)
 
     # 调节词频
     # 拆开两个字 AB -> A B
-    def break_word(A, B):
+    def break_word(self, A, B):
         jieba.suggest_freq((A, B), True)
     # 避免被拆开 A B -> AB
-    def combine(word):
+    def combine(self, word):
         jieba.suggest_freq(word, True)
 
-    def get_word_pseg(sent):
+    def get_word_pseg(self, sent):
         words = pseg.cut(sent)
         result = []
         for word, flag in words:
@@ -331,3 +343,9 @@ class FeatureHash(object):
 
 # 分箱计数
 # 用户在某广告的的优势比 用户 ctr / 此广告其他用户的ctr(可以取log)
+
+# 数据降维:数据挤压
+# 列空间秩小于特征总数，多数特征是几个关键特征的线性组合，基于此消除无信息量的特征
+# 特征空间数据点的方差最大化
+
+
