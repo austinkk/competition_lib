@@ -123,13 +123,13 @@ class ImageTFRecorder(object):
         self.record_path = './data/..'
     
     def int64_feature(self, value):
-        return tf.train.Feature(int64_feature = tf.train.Int64List(value = [value]))
+        return tf.train.Feature(int64_list = tf.train.Int64List(value = [value]))
     
     def bytes_feature(self, value):
-        return tf.train.Feature(bytes_feature = tf.train.BytesList(value = [value]))
+        return tf.train.Feature(bytes_list = tf.train.BytesList(value = [value]))
     
     def float_feature(self, value):
-        return tf.train.Feature(float_feature = tf.train.FloatList(value = [value]))
+        return tf.train.Feature(float_list = tf.train.FloatList(value = [value]))
     
     def process_image_channels(self, image):
         process_flag = False
@@ -172,11 +172,11 @@ class ImageTFRecorder(object):
         tf_example = tf.train.Example(
             features=tf.train.Features(
                 feature={
-                    'image/encoded': bytes_feature(encode_jpg),
-                    'image/format': bytes_feature(b'jpg'),
-                    'image/class/label': int64_feature(label),
-                    'image/height': int64_feature(height),
-                    'image/width': int64_feature(width)
+                    'image/encoded': self.bytes_feature(encode_jpg),
+                    'image/format': self.bytes_feature(b'jpg'),
+                    'image/class/label': self.int64_feature(label),
+                    'image/height': self.int64_feature(height),
+                    'image/width': self.int64_feature(width)
                 }
             )
         )
@@ -184,7 +184,7 @@ class ImageTFRecorder(object):
 
     def generate_tfrecord(self, annotation_list, record_path, resize=None):
         num_tf_example = 0
-        writer = tf.python_io.TFRecordWriter(self.record_path)
+        writer = tf.python_io.TFRecordWriter(record_path)
         for image_path, label in annotation_list:
             if not tf.gfile.GFile(image_path):
                 print("{} does not exist".format(image_path))
