@@ -10,9 +10,19 @@ import sys
 from data_loader import DataLoader
 
 class NlpTFRecorder(object):
-    def __init__(self, seq_num):
+    def __init__(self, seq_num, is_reg = True):
         self.seq_num = seq_num
+        self.is_reg = is_reg
         self.data_loader = DataLoader()
+
+    def preprocess(self, train_dir, vocab_dir, label_dir, vocab_size):
+        self.data_loader.build_vocab(traion_dir, vocab_dir, label_dir, vocab_size)
+        _, self.word_to_id, _ = self.data_loader.read_vocab(vocab_dir)
+        _, self.label_to_id, _ = self.data_loader.read_label(label_dir)
+
+    def process(self, file_list, file_name_list):
+        for file_dir, record_dir in zip(file_list, file_name_list): 
+            self.generate_tfrecord(file_dir, record_dir)
 
     def int64_feature(self, value):
         return tf.train.Feature(int64_list = tf.train.Int64List(value = [value]))
@@ -47,7 +57,7 @@ class NlpTFRecorder(object):
         )
         return tf_example
 
-    def generate_tfrecord(self, annotation_list, record_path, resize=None):
+    def generate_tfrecord(self, data_path, record_path):
         # annotation [([s1, s2, ... , sn], label)]
         num_tf_example = 0
         writer = tf.python_io.TFRecordWriter(record_path)
