@@ -44,37 +44,32 @@ class DataLoader(object):
     
     
     def read_file(self, filename):
-        """读取文件数据 func 用来改变格式"""
-        contents1, contents2, labels = [], [], []
+        """读取文件数据"""
+        contents = []
+        labels = []
         with self.open_file(filename) as f:
             for line in f:
                 try:
-                    if func != None:
-                        line = func(line)
-                    # label \t content1 \t content2
+                    # content1 \t content2 \t ... \t label
                     ls = line.strip().split('\t')
-                    if len(ls) == 2:
-                        contents1.append((self.native_content(ls[1])).split(' '))
-                        labels.append(self.native_content(label))
-                    else:
-                        contents1.append((self.native_content(ls[1])).split(' '))
-                        contents2.append((self.native_content(ls[2])).split(' '))
-                        labels.append(self.native_word(label))
+                    tmp = []
+                    for i in range(len(ls) - 1):
+                        tmp.append((self.native_content(ls[i])).split(' '))
+                    contents.append(tmp)
+                    labels.append(self.native_word(label))
                 except:
                     pass
-        return contents1, contents2, labels
+        return contents, labels
     
     
     def build_vocab(self, train_dir, vocab_dir, label_dir, vocab_size=5000):
         """根据训练集构建词汇表，存储"""
-        data_train1, data_train2, data_train_label = self.read_file(train_dir)
+        data_train, data_train_label = self.read_file(train_dir)
     
         all_data = []
-        for content in data_train1:
-            all_data.extend(content)
-        for content in data_train2:
-            all_data.extend(content)
-    
+        for ins in data_train:
+            for content in ins:
+                all_data.extend(content)
         counter = Counter(all_data)
         count_pairs = counter.most_common(vocab_size - 1)
         words, _ = list(zip(*count_pairs))
@@ -93,28 +88,27 @@ class DataLoader(object):
             # 如果是py2 则每个值都转化为unicode
             words = [self.native_content(_.strip()) for _ in fp.readlines()]
         word_to_id = dict(zip(words, range(len(words))))
-        return words, word_to_id
+        id_to_word = dict(zip(range(len(words)), words))
+        return words, word_to_id, id_to_word
     
     
-    def read_category(self):
+    def read_label(self, label_dir):
         """读取分类目录，固定"""
-        categories = ['体育', '财经', '房产', '家居', '教育', '科技', '时尚', '时政', '游戏', '娱乐']
+        with self.open_file(label_dir) as fp:
+            labels = [self.native_content(_.strip()) for _ in fp.readlines()]
     
-        categories = [native_content(x) for x in categories]
-    
-        cat_to_id = dict(zip(categories, range(len(categories))))
-    
-        return categories, cat_to_id
+        label_to_id = dict(zip(labels, range(len(labels))))
+        id_to_label = dict(zip(range(len(labels)), labels))   
+        return labels, label_to_id, id_to_label
     
     
-    def to_words(self, content, words):
+    def to_words(self, content, id_to_word):
         """将id表示的内容转换为文字"""
         return ' '.join(words[x] for x in content)
     
-    
-    def process_file(self, filename, word_to_id, cat_to_id, max_length=600):
+    def process_file(self, filename, word_to_id, label_to_id, is_reg = True):
         """将文件转换为id表示"""
-        contents, labels = read_file(filename)
+        contents, labels = self.read_file(filename)
     
         data_id, label_id = [], []
         for i in range(len(contents)):
@@ -122,7 +116,7 @@ class DataLoader(object):
             label_id.append(cat_to_id[labels[i]])
     
         # 使用keras提供的pad_sequences来将文本pad为固定长度
-        x_pad = kr.preprocessing.sequence.pad_sequences(data_id, max_length)
-        y_pad = kr.utils.to_categorical(label_id, num_classes=len(cat_to_id))  # 将标签转换为one-hot表示
+        #x_pad = kr.preprocessing.sequence.pad_sequences(data_id, max_length)
+        #y_pad = kr.utils.to_categorical(label_id, num_classes=len(cat_to_id))  # 将标签转换为one-hot表示
     
         return x_pad, y_pad

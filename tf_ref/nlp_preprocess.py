@@ -9,8 +9,8 @@ import os
 import sys
 
 class NlpTFRecorder(object):
-    def __init__(self):
-        pass
+    def __init__(self, seq_num):
+        self.seq_num = seq_num
 
     def int64_feature(self, value):
         return tf.train.Feature(int64_list = tf.train.Int64List(value = [value]))
@@ -24,12 +24,15 @@ class NlpTFRecorder(object):
     def list_feature(self, value):
         return tf.train.FeatureList(feature = value)
 
-    def create_tf_example(self, s1, s2, label):
+    def create_tf_example(self, sequence, label):
         # feature : [1,2,3,4,2,4,5,1,2] label : num
+        feature_list = {}
+        idx = 0
+        for s in sequence:
+            frame_feature = list(map(self.int64_feature, s))
+            feature_list['seq' + str(idx)] = self.list_feature(frame_feature)
+            idx += 1
 
-        frame_feature1 = list(map(self.int64_feature, s1))
-        frame_feature2 = list(map(self.int64_feature, s2))
-        
         tf_example = tf.train.SequenceExample(
             context = tf.train.Features(
                     feature = {
@@ -37,19 +40,17 @@ class NlpTFRecorder(object):
                     }
             ),
             feature_lists = tf.train.FeatureLists(
-                feature_list = {
-                    'sequence1' : self.list_feature(frame_feature1),
-                    'sequence2' : self.list_feature(frame_feature2)
-                }
+                feature_list = feature_list
             )
         )
         return tf_example
 
     def generate_tfrecord(self, annotation_list, record_path, resize=None):
+        # annotation [([s1, s2, ... , sn], label)]
         num_tf_example = 0
         writer = tf.python_io.TFRecordWriter(record_path)
-        for s1, s2, label in annotation_list:
-            tf_example = self.create_tf_example(s1, s2, label)
+        for sequence, label in annotation_list:
+            tf_example = self.create_tf_example(sequence, label)
             writer.write(tf_example.SerializeToString())
             num_tf_example += 1
             if num_tf_example % 100 == 0:
@@ -61,10 +62,9 @@ class NlpTFRecorder(object):
         context_features = {
             'label' : tf.FixedLenFeature([], dtype=tf.int64)
         }
-        sequence_features = {
-            'sequence1' : tf.FixedLenSequenceFeature([], dtype=tf.int64),
-            'sequence2' : tf.FixedLenSequenceFeature([], dtype=tf.int64)
-        }
+        sequence_features = {}
+        for i in range(self.seq_num):
+            sequence_features['seq' + str(i)] = tf.FixedLenSequenceFeature([], dtype=tf.int64)
 
         context_parsed, sequence_parsed = tf.parse_single_sequence_example(
             serialized=serialized_example,
@@ -73,9 +73,16 @@ class NlpTFRecorder(object):
         )
 
         labels = context_parsed['label']
-        sequences1 = sequence_parsed['sequence1']
-        sequences2 = sequence_parsed['sequence2']
-        return sequences1, sequences2, labels
+        if self.seq_num == 1:
+            seq1 = sequence_parsed['seq1']
+            return seq1, labels
+        if self.seq_num == 2:
+            seq2 = sequence_parsed['seq2']
+            return seq1, seq2, labels
+        if self.seq_num == 3:
+            seq3 = sequence_parsed['seq3']
+            return seq1, seq2, seq3, labels
+        return None
 
     def batched_data(self, tfrecord_filename, single_example_parser, batch_size, padded_shapes, num_epochs = 1, buffer_size = 1000):
         dataset = tf.data.TFRecordDataset(tfrecord_filename) \
