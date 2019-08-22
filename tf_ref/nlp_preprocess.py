@@ -7,10 +7,12 @@ import pandas as pd
 import io
 import os
 import sys
+from data_loader import DataLoader
 
 class NlpTFRecorder(object):
     def __init__(self, seq_num):
         self.seq_num = seq_num
+        self.data_loader = DataLoader()
 
     def int64_feature(self, value):
         return tf.train.Feature(int64_list = tf.train.Int64List(value = [value]))
