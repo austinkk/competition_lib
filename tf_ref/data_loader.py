@@ -19,14 +19,14 @@ class DataLoader(object):
     
     def native_word(self, word, encoding='utf-8'):
         """如果在python2下面使用python3训练的模型，可考虑调用此函数转化一下字符编码"""
-        if not is_py3:
+        if not self.is_py3:
             return word.decode(encoding)
         else:
             return word
     
     
     def native_content(self, content, encoding='utf-8'):
-        if not is_py3:
+        if not self.is_py3:
             return content.decode('utf-8')
         else:
             return content
@@ -37,7 +37,7 @@ class DataLoader(object):
         常用文件操作，可在python2和python3间切换.
         mode: 'r' or 'w' for read or write
         """
-        if is_py3:
+        if self.is_py3:
             return open(filename, mode, encoding='utf-8', errors='ignore')
         else:
             return open(filename, mode)
@@ -56,7 +56,7 @@ class DataLoader(object):
                     for i in range(len(ls) - 1):
                         tmp.append((self.native_content(ls[i])).split(' '))
                     contents.append(tmp)
-                    labels.append(self.native_word(label))
+                    labels.append(self.native_word(ls[-1]))
                 except:
                     pass
         return contents, labels
@@ -105,18 +105,3 @@ class DataLoader(object):
     def to_words(self, content, id_to_word):
         """将id表示的内容转换为文字"""
         return ' '.join(words[x] for x in content)
-    
-    def process_file(self, filename, word_to_id, label_to_id, is_reg = True):
-        """将文件转换为id表示"""
-        contents, labels = self.read_file(filename)
-    
-        data_id, label_id = [], []
-        for i in range(len(contents)):
-            data_id.append([word_to_id[x] for x in contents[i] if x in word_to_id])
-            label_id.append(cat_to_id[labels[i]])
-    
-        # 使用keras提供的pad_sequences来将文本pad为固定长度
-        #x_pad = kr.preprocessing.sequence.pad_sequences(data_id, max_length)
-        #y_pad = kr.utils.to_categorical(label_id, num_classes=len(cat_to_id))  # 将标签转换为one-hot表示
-    
-        return x_pad, y_pad

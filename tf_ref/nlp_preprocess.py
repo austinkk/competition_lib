@@ -8,6 +8,7 @@ import io
 import os
 import sys
 from data_loader import DataLoader
+import tensorflow.contrib.keras as kr
 
 class NlpTFRecorder(object):
     def __init__(self, seq_num, is_reg = True):
@@ -16,7 +17,7 @@ class NlpTFRecorder(object):
         self.data_loader = DataLoader()
 
     def preprocess(self, train_dir, vocab_dir, label_dir, vocab_size):
-        self.data_loader.build_vocab(traion_dir, vocab_dir, label_dir, vocab_size)
+        self.data_loader.build_vocab(train_dir, vocab_dir, label_dir, vocab_size)
         _, self.word_to_id, _ = self.data_loader.read_vocab(vocab_dir)
         _, self.label_to_id, _ = self.data_loader.read_label(label_dir)
 
@@ -58,16 +59,25 @@ class NlpTFRecorder(object):
         return tf_example
 
     def generate_tfrecord(self, data_path, record_path):
-        # annotation [([s1, s2, ... , sn], label)]
+        # [s1, s2, ... , sn], label
         num_tf_example = 0
         writer = tf.python_io.TFRecordWriter(record_path)
-        for sequence, label in annotation_list:
-            tf_example = self.create_tf_example(sequence, label)
-            writer.write(tf_example.SerializeToString())
-            num_tf_example += 1
-            if num_tf_example % 100 == 0:
-                print("Create %d TF_Example" % num_tf_example)
-        writer.close()
+        with self.data_loader.open_file(data_path) as fp:
+            for line in fp:
+                ls = (self.data_loader.native_content(line.strip())).split('\t')
+                sequence = []
+                if self.is_reg:
+                    label = int(ls[-1])
+                else:
+                    label = self.label_to_id[ls[-1]]
+                for seq_index in range(self.seq_num):
+                    sequence.append(map(lambda x: self.word_to_id.get(x, 0), ls[seq_index].split(" ")))
+                tf_example = self.create_tf_example(sequence, label)
+                writer.write(tf_example.SerializeToString())
+                num_tf_example += 1
+                if num_tf_example % 500 == 0:
+                    print("Create %d TF_Example" % num_tf_example)
+            writer.close()
         print("{} tf_examples has been created successfully, which are saved in {}".format(num_tf_example, record_path))
 
     def single_example_parser(self, serialized_example):
@@ -85,15 +95,15 @@ class NlpTFRecorder(object):
         )
 
         labels = context_parsed['label']
+        if self.seq_num == 0:
+            seq1 = sequence_parsed['seq0']
+            return seq0, labels
         if self.seq_num == 1:
-            seq1 = sequence_parsed['seq1']
-            return seq1, labels
+            seq2 = sequence_parsed['seq1']
+            return seq0, seq1, labels
         if self.seq_num == 2:
-            seq2 = sequence_parsed['seq2']
-            return seq1, seq2, labels
-        if self.seq_num == 3:
-            seq3 = sequence_parsed['seq3']
-            return seq1, seq2, seq3, labels
+            seq3 = sequence_parsed['seq2']
+            return seq0, seq1, seq2, labels
         return None
 
     def batched_data(self, tfrecord_filename, single_example_parser, batch_size, padded_shapes, num_epochs = 1, buffer_size = 1000):
@@ -105,8 +115,8 @@ class NlpTFRecorder(object):
         return dataset.make_one_shot_iterator().get_next()
 
     def test(self, tfrecord_filename, pad1 = None, pad2 = None):
-        def model(s1, s2, labels):
-            return s1, s2, labels
+        def model(s0, s1, labels):
+            return s0, s1, labels
         out = model(*self.batched_data(tfrecord_filename, self.single_example_parser, 2, ([pad1], [pad2] ,[])))
         config = tf.ConfigProto()
         # config.gpu_options.per_process_gpu_memory_fraction = 0.4  #占用40%显存
@@ -121,7 +131,8 @@ class NlpTFRecorder(object):
             threads = tf.train.start_queue_runners(sess=sess, coord=coord)
             try:
                 while not coord.should_stop():
-                    print(sess.run(out))
+                    train_X, train_label = sess.run(out)
+                    train_X = kr.preprocessing.sequence.pad_sequences(train_X, 100)
             except tf.errors.OutOfRangeError:
                 print("done training")
             finally:
