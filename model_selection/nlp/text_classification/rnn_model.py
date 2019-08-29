@@ -115,7 +115,7 @@ class TextRNN(object):
 
         with tf.name_scope("accuracy"):
             # 准确率
-            correct_pred = tf.equal(tf.argmax(self.input_y, 1), self.y_pred_cls)
+            correct_pred = tf.equal(self.input_y, self.y_pred_cls)
             self.acc = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 
     def _get_time_dif(self, start_time):
