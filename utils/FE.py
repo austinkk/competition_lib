@@ -86,7 +86,7 @@ def l2(x):
 # n元词袋
 class BagOfNGram(object):
     def __init__(self, texts, config, stopwordpath = ""):
-       if len(stopwordpath) > 0:
+        if len(stopwordpath) > 0:
             config['stop_words'] = _read_stop_word(stopwordpath)
         self.cv = CountVectorizer(**config)
         self.cv.fit(texts)
