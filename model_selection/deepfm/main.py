@@ -15,48 +15,30 @@ from DeepFM import DeepFM
 
 #gini_scorer = make_scorer(gini_norm, greater_is_better=True, needs_proba=True)
 
-
-def _load_data():
-
-    dfTrain = pd.read_csv(config.TRAIN_FILE)
-    dfTest = pd.read_csv(config.TEST_FILE)
-
-    def preprocess(df):
-        cols = [c for c in df.columns if c not in [config.UID, config.LABEL]]
-        #df["missing_feat"] = np.sum((df[cols] == -1).values, axis=1)
-        return df
-
-    dfTrain = preprocess(dfTrain)
-    dfTest = preprocess(dfTest)
-
-    cols = [c for c in dfTrain.columns if c not in [config.UID, config.LABEL]]
-    cols = [c for c in cols if (not c in config.IGNORE_COLS)]
-
-    X_train = dfTrain[cols].values
-    y_train = dfTrain[config.LABEL].values
-    X_test = dfTest[cols].values
-    ids_test = dfTest[config.UID].values
-    cat_features_indices = [i for i,c in enumerate(cols) if c in config.CATEGORICAL_COLS]
-    return dfTrain, dfTest, X_train, y_train, X_test, ids_test, cat_features_indices
-
-
-def _run_base_model_dfm(dfTrain, dfTest, folds, dfm_params):
+def _run_base_model_dfm(dfTrain = None, dfTest = None, trainfile = None, testfile = None, dfm_params = None):
     fd = FeatureDictionary(dfTrain=dfTrain, dfTest=dfTest,
+                           trainfile=trainfile, testfile=testfile,
                            numeric_cols=config.NUMERIC_COLS,
                            ignore_cols=config.IGNORE_COLS)
     data_parser = DataParser(feat_dict=fd)
-    Xi_train, Xv_train, y_train = data_parser.parse(df=dfTrain, has_label=True)
-    Xi_test, Xv_test, ids_test = data_parser.parse(df=dfTest)
+    Xi_train, Xv_train, y_train = data_parser.parse(df=fd.dfTrain, has_label=True, target = config.LABEL)
+    Xi_test, Xv_test, ids_test = data_parser.parse(df=fd.dfTest, uid = config.UID)
 
     dfm_params["feature_size"] = fd.feat_dim
     dfm_params["field_size"] = len(Xi_train[0])
 
-    y_train_meta = np.zeros((dfTrain.shape[0], 1), dtype=float)
-    y_test_meta = np.zeros((dfTest.shape[0], 1), dtype=float)
+    y_train_meta = np.zeros((fd.dfTrain.shape[0], 1), dtype=float)
+    y_test_meta = np.zeros((fd.dfTest.shape[0], 1), dtype=float)
     _get = lambda x, l: [x[i] for i in l]
+
+    # folds
+    folds = list(StratifiedKFold(n_splits=config.NUM_SPLITS, shuffle=True,
+                                 random_state=config.RANDOM_SEED).split(np.array(Xv_train), y_train))
+
     err_results_cv = np.zeros(len(folds), dtype=float)
     err_results_epoch_train = np.zeros((len(folds), dfm_params["epoch"]), dtype=float)
     err_results_epoch_valid = np.zeros((len(folds), dfm_params["epoch"]), dtype=float)
+
     for i, (train_idx, valid_idx) in enumerate(folds):
         Xi_train_, Xv_train_, y_train_ = _get(Xi_train, train_idx), _get(Xv_train, train_idx), _get(y_train, train_idx)
         Xi_valid_, Xv_valid_, y_valid_ = _get(Xi_train, valid_idx), _get(Xv_train, valid_idx), _get(y_train, valid_idx)
@@ -115,11 +97,7 @@ def _plot_fig(train_results, valid_results, model_name):
 config = DeepFMConfig()
 
 # load data
-dfTrain, dfTest, X_train, y_train, X_test, ids_test, cat_features_indices = _load_data()
-
-# folds
-folds = list(StratifiedKFold(n_splits=config.NUM_SPLITS, shuffle=True,
-                             random_state=config.RANDOM_SEED).split(X_train, y_train))
+#dfTrain, dfTest, X_train, y_train, X_test, ids_test, cat_features_indices = _load_data()
 
 y_train_dfm, y_test_dfm = _run_base_model_dfm(dfTrain, dfTest, folds, config.dfm_params)
 

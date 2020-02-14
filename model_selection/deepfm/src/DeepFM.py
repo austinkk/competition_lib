@@ -20,6 +20,7 @@ class DeepFMConfig():
     NUM_SPLITS = 3
     RANDOM_SEED = 2019
 
+    # this is not used actually!
     CATEGORICAL_COLS = []
     NUMERIC_COLS = []
 
@@ -27,6 +28,20 @@ class DeepFMConfig():
     UID = "userid"
     LABEL = "credits"
 
+    """
+    -- INIT WEIGHTS --
+    *glorot weakness : activation is linear, isn't suitable for Relu, sigmoid, activation value must be symmetry of zero*
+    normal_glorot : avg = 0 stddev = sqrt(2 / (fan_in + fan_out))
+    uniform_glorot : limit = sqrt(6 / (fan_in + fan_out))
+
+    *kaiming*
+    normal_kaiming : avg = 0 stddev = sqrt(2 / fan_in)
+    uniform_kaiming : limit = sqrt(6 / fan_in)
+
+    *lecun*
+    normal_lecun : avg = 0 stddev = sqrt(1 / fan_in)
+    uniform_lecun : limit = sqrt(3 / fan_in)
+    """
     dfm_params = {
                   "use_fm": True,
                   "use_deep": True,
@@ -44,7 +59,8 @@ class DeepFMConfig():
                   "l2_reg": 0.01,
                   "verbose": True,
                   "eval_metric": mae,
-                  "random_seed": RANDOM_SEED
+                  "random_seed": RANDOM_SEED,
+                  "init_weights": "normal_kaiming"
                  }              
 
 
@@ -57,6 +73,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
                  learning_rate=0.001, optimizer_type="adam",
                  batch_norm=0, batch_norm_decay=0.995,
                  verbose=False, random_seed=2016,
+                 init_weights = "normal_kaiming",
                  use_fm=True, use_deep=True,
                  loss_type="logloss", eval_metric=roc_auc_score,
                  l2_reg=0.0, greater_is_better=True):
@@ -75,6 +92,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
         self.use_fm = use_fm
         self.use_deep = use_deep
         self.l2_reg = l2_reg
+        self.init_weights = init_weights
 
         self.epoch = epoch
         self.batch_size = batch_size
@@ -97,7 +115,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
     def _init_graph(self):
         self.graph = tf.Graph()
         with self.graph.as_default():
-
+            # set seed
             tf.set_random_seed(self.random_seed)
 
             self.feat_index = tf.placeholder(tf.int32, shape=[None, None],
@@ -105,6 +123,7 @@ class DeepFM(BaseEstimator, TransformerMixin):
             self.feat_value = tf.placeholder(tf.float32, shape=[None, None],
                                                  name="feat_value")  # None * F
             self.label = tf.placeholder(tf.float32, shape=[None, 1], name="label")  # None * 1
+
             self.dropout_keep_fm = tf.placeholder(tf.float32, shape=[None], name="dropout_keep_fm")
             self.dropout_keep_deep = tf.placeholder(tf.float32, shape=[None], name="dropout_keep_deep")
             self.train_phase = tf.placeholder(tf.bool, name="train_phase")
@@ -208,6 +227,31 @@ class DeepFM(BaseEstimator, TransformerMixin):
         config.gpu_options.allow_growth = True
         return tf.Session(config=config)
 
+    def _get_init_params(self, fan_in, fan_out, is_bias = False):
+        size = (fan_in, fan_out)
+        if is_bias:
+            size = (1, fan_out)
+        if "normal" in self.init_weights:
+            if "glorot" in self.init_weigths:
+                stddev = np.sqrt(2.0 / (fan_in + fan_out))
+                return np.random.normal(loc = 0, scale = stddev, size = size)
+            if "kaiming" in self.init_weights:
+                stddev = np.sqrt(2.0 / fan_in)
+                return np.random.normal(loc = 0, scale = stddev, size = size)
+            if "lecun" in self.init_weights:
+                stddev = np.sqrt(1.0 / fan_in)
+                return np.random.normal(loc = 0, scale = stddev, size = size)
+        if "uniform" in self.init_weights:
+            if "glorot" in self.init_weigths:
+                limit = sqrt(6 / (fan_in + fan_out))
+                return np.random.uniform(low = -limit, high = limit, size = size)
+            if "kaiming" in self.init_weights:
+                limit = sqrt(6 / fan_in)
+                return np.random.uniform(low = -limit, high = limit, size = size)
+            if "lecun" in self.init_weights:
+                limit = sqrt(3 / fan_in)
+                return np.random.uniform(low = -limit, high = limit, size = size)
+              
 
     def _initialize_weights(self):
         weights = dict()
@@ -222,18 +266,16 @@ class DeepFM(BaseEstimator, TransformerMixin):
         # deep layers
         num_layer = len(self.deep_layers)
         input_size = self.field_size * self.embedding_size
-        glorot = np.sqrt(2.0 / (input_size + self.deep_layers[0]))
+
         weights["layer_0"] = tf.Variable(
-            np.random.normal(loc=0, scale=glorot, size=(input_size, self.deep_layers[0])), dtype=np.float32)
-        weights["bias_0"] = tf.Variable(np.random.normal(loc=0, scale=glorot, size=(1, self.deep_layers[0])),
-                                                        dtype=np.float32)  # 1 * layers[0]
+            self._get_init_params(input_size, self.deep_layers[0]), dtype=np.float32)
+        weights["bias_0"] = tf.Variable(self._get_init_params(input_size, self.deep_layers[0], is_bias = True), dtype=np.float32)  # 1 * layers[0]
         for i in range(1, num_layer):
-            glorot = np.sqrt(2.0 / (self.deep_layers[i-1] + self.deep_layers[i]))
             weights["layer_%d" % i] = tf.Variable(
-                np.random.normal(loc=0, scale=glorot, size=(self.deep_layers[i-1], self.deep_layers[i])),
+                self._get_init_params(self.deep_layers[i-1], self.deep_layers[i]),
                 dtype=np.float32)  # layers[i-1] * layers[i]
             weights["bias_%d" % i] = tf.Variable(
-                np.random.normal(loc=0, scale=glorot, size=(1, self.deep_layers[i])),
+                self._get_init_params(self.deep_layers[i-1], self.deep_layers[i], is_bias = True),
                 dtype=np.float32)  # 1 * layer[i]
 
         # final concat projection layer
@@ -243,9 +285,8 @@ class DeepFM(BaseEstimator, TransformerMixin):
             input_size = self.field_size + self.embedding_size
         elif self.use_deep:
             input_size = self.deep_layers[-1]
-        glorot = np.sqrt(2.0 / (input_size + 1))
         weights["concat_projection"] = tf.Variable(
-                        np.random.normal(loc=0, scale=glorot, size=(input_size, 1)),
+                        self._get_init_params(input_size, 1),
                         dtype=np.float32)  # layers[i-1]*layers[i]
         weights["concat_bias"] = tf.Variable(tf.constant(0.01), dtype=np.float32)
 
