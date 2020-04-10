@@ -12,55 +12,45 @@ import numpy as np
 class Mylgb_regression(object):
     """mylgb is best tool for data mining"""
     def __init__(self, config):
-        if "params" in config:
-            self.params = config["params"]
-        else:
-            self.set_default_params()
+        # model params
+        self.params = config.get('params', get_default_params())
 
-        if "df_train" in config:
-            self.df_train = config["df_train"]
-        else:
-            self.df_train = None
-        if "df_test" in config:
-            self.df_test = config["df_test"]
-        else:
-            self.df_test = None
+        # train/test data
+        self.df_train = config.get("df_train", None)
+        self.df_test = config.get("df_test", None)
 
+        # indicate the col of id and label
         self.id_name = config["id_name"]
         self.label_name = config["label_name"]
-        if "base_feature" in config:
-            self.base_feature = config["base_feature"]
-        else:
-            self.base_feature = [col_name for col_name in self.df_train.columns if col_name not in [self.id_name, self.label_name]]
 
-        if "best_feature" in config:
-            self.best_feature = config["best_feature"]
-        else:
-            self.best_feature = [col_name for col_name in self.base_feature]
+        # base feature
+        # use these feature for training at first
+        self.base_feature = config.get("base_feature",
+                [col_name for col_name in self.df_train.columns if col_name not in [self.id_name, self.label_name]]
+                )
 
-        if "nfold" in config:
-            self.nfold = config["nfold"]
-        else:
-            self.nfold = 5
-        if "num_boost_round" in config:
-            self.num_boost_round = config['num_boost_round']
-        else:
-            self.num_boost_round = 5000
-        if "seed" in config:
-            self.seed = config["seed"]
-        else:
-            self.seed = 666
-        if "early_stopping_rounds" in config:
-            self.early_stopping_rounds = config["early_stopping_rounds"]
-        else:
-            self.early_stopping_rounds = 100
-        if "verbose_eval" in config:
-            self.verbose_eval = config[verbose_eval]
-        else:
-            self.verbose_eval = 100
+        # best_feature
+        self.best_feature = config.get("best_feature", [col_name for col_name in self.base_feature])
+
+        # how many folds
+        self.nfold = config.get("nfold", 5)
+
+        # how many boost rounds
+        self.num_boost_round = config.get('num_boost_round', 5000)
+
+        # random seed
+        self.seed = config.get("seed", 666)
+
+        # early stopping rounds
+        self.early_stopping_rounds = config.get("early_stopping_rounds", 100)
+
+        # verbose_eval
+        self.verbose_eval = config.get("verbose_eval", 100)
+
         self.min_merror = float('Inf')
         self.model = None
 
+    # different question has different best thres and different methods to get them
     def get_best_thres(self):
         pass
 
@@ -76,6 +66,8 @@ class Mylgb_regression(object):
                     tmp_best_feature = [col_name for col_name in list(tmp_feature)]
                     base_best_score = tmp_score
             if is_found:
+                for item in (set(self.base_feature) - set(tmp_best_feature)):
+                    print ('remove feature: %s' % item)
                 self.base_feature = tmp_best_feature
             else:
                 break
@@ -94,6 +86,7 @@ class Mylgb_regression(object):
                     add_feature = tmp_feature
                     base_best_score = tmp_score
             if is_found:
+                print ('add feature: %s' % add_feature)
                 self.base_feature.append(add_feature)
                 nf_l.remove(add_feature)
             else:
@@ -145,8 +138,8 @@ class Mylgb_regression(object):
         else:
             df_submit.to_csv(filepath, index = None)
 
-    def set_default_params(self):
-        self.params = {
+    def get_default_params(self):
+        params = {
             'boosting_type': 'gbdt',
             'objective': 'regression_l1',
             'metric':'mae',
@@ -161,6 +154,7 @@ class Mylgb_regression(object):
             'max_depth': -1,
             'verbose': 0
         }
+        return params
 
 
     def find_best_params(self, seed = 66, nfold = 5, early_stopping_rounds = 100):
